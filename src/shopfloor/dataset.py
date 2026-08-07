@@ -1,82 +1,94 @@
-"""A validated wrapper around a single SKAB experiment file."""
+"""A validated wrapper around the UCI hydraulic test rig dataset."""
 
 from pathlib import Path
 
-from shopfloor.data import LABELS, NON_NUMERIC, read_csv
-
-REQUIRED_COLUMNS = {
-    "datetime",
-    "Accelerometer1RMS",
-    "Accelerometer2RMS",
-    "Current",
-    "Pressure",
-    "Temperature",
-    "Thermocouple",
-    "Voltage",
-    "Volume Flow RateRMS",
-    "anomaly",
-    "changepoint",
-}
+from shopfloor.data import (
+    CYCLE_SECONDS,
+    HEALTHY,
+    N_CYCLES,
+    PROFILE_COLUMNS,
+    SENSORS,
+    read_profile,
+    read_sensor,
+)
 
 
-class SkabDataError(Exception):
-    """Raised when a SKAB file does not have the expected structure."""
+class HydraulicDataError(Exception):
+    """Raised when the dataset directory is missing files or has wrong shapes."""
 
 
-class SkabDataset:
-    """One SKAB experiment loaded from CSV, with its columns validated."""
+class HydraulicDataset:
+    """The hydraulic rig dataset: 17 sensors and 4 component states per cycle."""
 
-    def __init__(self, path: str | Path) -> None:
-        self.path = Path(path)
-        self.rows = read_csv(self.path)
-        self._validate()
+    def __init__(self, root: str | Path) -> None:
+        self.root = Path(root)
+        self._check_files()
+        self.profile = read_profile(self.root / "profile.txt")
+        self.sensors = {name: read_sensor(self.root / f"{name}.txt") for name in SENSORS}
+        self._check_shapes()
 
-    def _validate(self) -> None:
-        """Raise SkabDataError if the file is empty or missing columns."""
-        if not self.rows:
-            raise SkabDataError(f"{self.path.name} contains no data rows")
-
-        missing = REQUIRED_COLUMNS - set(self.rows[0])
+    def _check_files(self) -> None:
+        """Raise if any expected file is missing."""
+        expected = {f"{name}.txt" for name in SENSORS} | {"profile.txt"}
+        missing = expected - {p.name for p in self.root.glob("*.txt")}
         if missing:
-            raise SkabDataError(f"{self.path.name} is missing columns: {sorted(missing)}")
+            raise HydraulicDataError(f"missing files: {sorted(missing)}")
+
+    def _check_shapes(self) -> None:
+        """Raise if any matrix has the wrong number of cycles or timepoints."""
+        if len(self.profile) != N_CYCLES:
+            raise HydraulicDataError(f"profile has {len(self.profile)} rows, expected {N_CYCLES}")
+
+        for name, rate in SENSORS.items():
+            matrix = self.sensors[name]
+            expected_points = rate * CYCLE_SECONDS
+            if len(matrix) != N_CYCLES:
+                raise HydraulicDataError(f"{name}: {len(matrix)} cycles, expected {N_CYCLES}")
+            if len(matrix[0]) != expected_points:
+                raise HydraulicDataError(
+                    f"{name}: {len(matrix[0])} points, expected {expected_points}"
+                )
 
     def __len__(self) -> int:
-        return len(self.rows)
+        return N_CYCLES
 
-    def __getitem__(self, index: int) -> dict[str, str]:
-        return self.rows[index]
+    def __getitem__(self, index: int) -> dict[str, object]:
+        """Return one cycle: raw signal per sensor plus the four component states."""
+        return {
+            "signals": {name: matrix[index] for name, matrix in self.sensors.items()},
+            "labels": self.profile[index],
+        }
 
     def __repr__(self) -> str:
-        return (
-            f"SkabDataset({self.path.name!r}, "
-            f"{len(self)} rows, {len(self.anomaly_indices)} anomalous)"
-        )
+        return f"HydraulicDataset({self.root.name!r}, {len(self)} cycles, {len(SENSORS)} sensors)"
 
-    @property
-    def sensor_columns(self) -> list[str]:
-        """Column names holding sensor readings — no timestamp, no labels."""
-        return [c for c in self.rows[0] if c not in NON_NUMERIC and c not in LABELS]
+    def labels(self, component: str) -> list[int]:
+        """All cycle values for one component, e.g. "valve"."""
+        if component not in PROFILE_COLUMNS:
+            raise HydraulicDataError(f"unknown component {component!r}")
+        return [row[component] for row in self.profile]
 
-    @property
-    def anomaly_indices(self) -> list[int]:
-        """Row positions where anomaly == 1."""
-        return [i for i, r in enumerate(self.rows) if float(r["anomaly"]) == 1]
+    def healthy_indices(self, component: str | None = None) -> list[int]:
+        """Cycles healthy in one component, or in all four if component is None."""
+        if component is not None:
+            target = HEALTHY[component]
+            return [i for i, row in enumerate(self.profile) if row[component] == target]
+        return [
+            i for i, row in enumerate(self.profile) if all(row[c] == v for c, v in HEALTHY.items())
+        ]
 
 
 if __name__ == "__main__":
-    ds = SkabDataset("data/raw/valve1_0.csv")
+    ds = HydraulicDataset("data/raw/hydraulic")
     print(ds)
-    print(f"len:             {len(ds)}")
-    print(f"sensor columns:  {ds.sensor_columns}")
-    print(f"first row time:  {ds[0]['datetime']}")
-    print(f"anomaly span:    {min(ds.anomaly_indices)}–{max(ds.anomaly_indices)}")
-    print(f"iterable:        {sum(1 for _ in ds)} rows by iteration")
 
-    broken = Path("data/raw/broken.csv")
-    broken.write_text("datetime;Current\n2020-03-09 10:00:00;1.0\n")
-    try:
-        SkabDataset(broken)
-    except SkabDataError as e:
-        print(f"\ncaught as expected:\n  {e}")
-    finally:
-        broken.unlink(missing_ok=True)
+    cycle = ds[0]
+    print(f"labels[0]:        {cycle['labels']}")
+    print(f"PS1 points:       {len(cycle['signals']['PS1'])}")
+    print(f"TS1 points:       {len(cycle['signals']['TS1'])}")
+
+    for component in HEALTHY:
+        n = len(ds.healthy_indices(component))
+        print(f"healthy {component:<12} {n:>5}  ({n / len(ds):.1%})")
+
+    print(f"healthy in all four: {len(ds.healthy_indices())}")
