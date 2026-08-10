@@ -7,7 +7,10 @@ authors = [
     { name = "OlenaP94", email = "93668425+OlenaP94@users.noreply.github.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.15.0",
+]
 
 [project.scripts]
 shopfloor = "shopfloor:main"

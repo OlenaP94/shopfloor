@@ -8,11 +8,14 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-URL = "https://archive.ics.uci.edu/static/public/447/condition+monitoring+of+hydraulic+systems.zip"
-DEST = Path("data/raw/hydraulic")
+from shopfloor.config import settings
 
-# Paste the hash printed on the first successful run to pin the download.
-EXPECTED_SHA256 = ""
+URL = "https://archive.ics.uci.edu/static/public/447/condition+monitoring+of+hydraulic+systems.zip"
+DEST = settings.data_dir
+
+# Pinned on 2026-08-10. If this ever mismatches, the file on UCI changed
+# or the download was corrupted — investigate before overwriting it.
+EXPECTED_SHA256 = "24128aad2ee45eea7e6b63ebbd9992cdf25d0483a2cebefbfc13bc69079af1f2"
 
 # name -> expected number of columns (sampling rate x 60 s)
 EXPECTED_COLUMNS = {

@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import TypedDict
 
+from shopfloor.config import settings
 from shopfloor.data import (
     CYCLE_SECONDS,
     HEALTHY,
@@ -38,7 +39,10 @@ class HydraulicDataset:
         self._check_shapes()
 
     def _check_files(self) -> None:
-        """Raise if any expected file is missing."""
+        """Raise if the directory or any expected file is missing."""
+        if not self.root.exists():
+            raise HydraulicDataError(f"{self.root} does not exist — run `make data` first")
+
         expected = {f"{name}.txt" for name in SENSORS} | {"profile.txt"}
         missing = expected - {p.name for p in self.root.glob("*.txt")}
         if missing:
@@ -90,7 +94,7 @@ class HydraulicDataset:
 
 
 if __name__ == "__main__":
-    ds = HydraulicDataset("data/raw/hydraulic")
+    ds = HydraulicDataset(settings.data_dir)
     print(ds)
 
     cycle = ds[0]
