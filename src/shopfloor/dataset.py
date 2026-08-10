@@ -1,6 +1,7 @@
 """A validated wrapper around the UCI hydraulic test rig dataset."""
 
 from pathlib import Path
+from typing import TypedDict
 
 from shopfloor.data import (
     CYCLE_SECONDS,
@@ -8,9 +9,18 @@ from shopfloor.data import (
     N_CYCLES,
     PROFILE_COLUMNS,
     SENSORS,
+    Component,
+    ProfileColumn,
     read_profile,
     read_sensor,
 )
+
+
+class Cycle(TypedDict):
+    """One cycle: the raw signal of every sensor plus the four component states."""
+
+    signals: dict[str, list[float]]
+    labels: dict[ProfileColumn, int]
 
 
 class HydraulicDataError(Exception):
@@ -52,8 +62,7 @@ class HydraulicDataset:
     def __len__(self) -> int:
         return N_CYCLES
 
-    def __getitem__(self, index: int) -> dict[str, object]:
-        """Return one cycle: raw signal per sensor plus the four component states."""
+    def __getitem__(self, index: int) -> Cycle:
         return {
             "signals": {name: matrix[index] for name, matrix in self.sensors.items()},
             "labels": self.profile[index],
@@ -62,15 +71,17 @@ class HydraulicDataset:
     def __repr__(self) -> str:
         return f"HydraulicDataset({self.root.name!r}, {len(self)} cycles, {len(SENSORS)} sensors)"
 
-    def labels(self, component: str) -> list[int]:
-        """All cycle values for one component, e.g. "valve"."""
+    def labels(self, component: ProfileColumn) -> list[int]:
+        """All cycle values for one column of profile.txt, e.g. "valve"."""
         if component not in PROFILE_COLUMNS:
-            raise HydraulicDataError(f"unknown component {component!r}")
+            raise HydraulicDataError(f"unknown column {component!r}")
         return [row[component] for row in self.profile]
 
-    def healthy_indices(self, component: str | None = None) -> list[int]:
+    def healthy_indices(self, component: Component | None = None) -> list[int]:
         """Cycles healthy in one component, or in all four if component is None."""
         if component is not None:
+            if component not in HEALTHY:
+                raise HydraulicDataError(f"unknown component {component!r}")
             target = HEALTHY[component]
             return [i for i, row in enumerate(self.profile) if row[component] == target]
         return [
