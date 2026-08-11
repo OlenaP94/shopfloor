@@ -6,8 +6,8 @@ data:  ## download, verify and unpack the UCI hydraulic dataset
 clean-data:  ## remove the downloaded dataset
 	rm -rf data/raw/hydraulic
 
-lint:  ## static checks
-	uv run ruff check src tests scripts
+lint:  ## everything pre-commit runs — ruff plus whitespace and file hygiene
+	uv run pre-commit run --all-files
 
 format:  ## apply formatting
 	uv run ruff format src tests scripts

@@ -81,3 +81,19 @@ def test_sensor_with_wrong_point_count(tiny_dataset: Path) -> None:
 def test_unknown_component(tiny_dataset: Path) -> None:
     with pytest.raises(HydraulicDataError, match="unknown component"):
         HydraulicDataset(tiny_dataset).healthy_indices("gearbox")
+
+
+def test_repr_mentions_size(tiny_dataset: Path) -> None:
+    text = repr(HydraulicDataset(tiny_dataset))
+
+    assert "3 cycles" in text
+    assert "17 sensors" in text
+
+
+def test_labels_returns_one_value_per_cycle(tiny_dataset: Path) -> None:
+    assert HydraulicDataset(tiny_dataset).labels("valve") == [100, 73, 90]
+
+
+def test_labels_rejects_unknown_column(tiny_dataset: Path) -> None:
+    with pytest.raises(HydraulicDataError, match="unknown column"):
+        HydraulicDataset(tiny_dataset).labels("gearbox")
