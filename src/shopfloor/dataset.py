@@ -7,7 +7,6 @@ from shopfloor.config import settings
 from shopfloor.data import (
     CYCLE_SECONDS,
     HEALTHY,
-    N_CYCLES,
     PROFILE_COLUMNS,
     SENSORS,
     Component,
@@ -49,22 +48,23 @@ class HydraulicDataset:
             raise HydraulicDataError(f"missing files: {sorted(missing)}")
 
     def _check_shapes(self) -> None:
-        """Raise if any matrix has the wrong number of cycles or timepoints."""
-        if len(self.profile) != N_CYCLES:
-            raise HydraulicDataError(f"profile has {len(self.profile)} rows, expected {N_CYCLES}")
+        """Raise if the profile is empty or any sensor matrix disagrees with it."""
+        n_cycles = len(self.profile)
+        if n_cycles == 0:
+            raise HydraulicDataError(f"{self.root / 'profile.txt'} has no rows")
 
         for name, rate in SENSORS.items():
             matrix = self.sensors[name]
             expected_points = rate * CYCLE_SECONDS
-            if len(matrix) != N_CYCLES:
-                raise HydraulicDataError(f"{name}: {len(matrix)} cycles, expected {N_CYCLES}")
+            if len(matrix) != n_cycles:
+                raise HydraulicDataError(f"{name}: {len(matrix)} cycles, expected {n_cycles}")
             if len(matrix[0]) != expected_points:
                 raise HydraulicDataError(
                     f"{name}: {len(matrix[0])} points, expected {expected_points}"
                 )
 
     def __len__(self) -> int:
-        return N_CYCLES
+        return len(self.profile)
 
     def __getitem__(self, index: int) -> Cycle:
         return {
