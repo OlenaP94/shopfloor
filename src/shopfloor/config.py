@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data/raw/hydraulic")
     """Where the dataset should live. Whether it is actually there is checked on use."""
 
+    processed_dir: Path = Path("data/processed")
+    """Where derived arrays are written. Created on first write."""
+
     seed: int = 42
     test_size: float = Field(default=0.2, gt=0, lt=1)
     val_size: float = Field(default=0.15, gt=0, lt=1)

@@ -1,4 +1,4 @@
-.PHONY: data clean-data lint format test check
+.PHONY: data clean-data tensor lint format test check
 
 data:  ## download, verify and unpack the UCI hydraulic dataset
 	uv run python scripts/download_data.py
@@ -16,3 +16,6 @@ test:  ## run the test suite
 	uv run pytest
 
 check: format lint test  ## format, then everything CI runs
+
+tensor:  ## build the numpy tensor from the raw dataset
+	uv run python -m shopfloor.arrays
