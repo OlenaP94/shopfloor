@@ -19,3 +19,6 @@ check: format lint test  ## format, then everything CI runs
 
 tensor:  ## build the numpy tensor from the raw dataset
 	uv run python -m shopfloor.arrays
+
+eda:  ## plot which channels respond to which fault
+	uv run python scripts/eda.py
