@@ -8,3 +8,8 @@ __pycache__/
 data/
 models/
 .DS_Store
+
+# working notes — kept outside the repo at ~/dev/notes/, listed here in case a copy
+# ever lands inside it
+lessons.md
+notes/

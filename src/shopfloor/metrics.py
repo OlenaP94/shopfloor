@@ -65,6 +65,10 @@ def alarm_rates(y_true: np.ndarray, y_pred: np.ndarray, healthy: int) -> tuple[f
 
     A fault graded at the wrong severity is not a missed alarm: the alarm still fired.
     That is why these two numbers say something macro F1 does not.
+
+    With no healthy cycles the false-alarm rate does not exist, and likewise for the
+    missed-alarm rate with no faulty ones. Those cases return nan rather than 0.0:
+    "no false alarms" and "false alarms could not be measured" must not look alike.
     """
     truly_faulty = np.asarray(y_true) != healthy
     flagged = np.asarray(y_pred) != healthy
@@ -72,9 +76,25 @@ def alarm_rates(y_true: np.ndarray, y_pred: np.ndarray, healthy: int) -> tuple[f
     n_healthy = int((~truly_faulty).sum())
     n_faulty = int(truly_faulty.sum())
 
-    far = float((flagged & ~truly_faulty).sum() / n_healthy) if n_healthy else 0.0
-    mar = float((~flagged & truly_faulty).sum() / n_faulty) if n_faulty else 0.0
+    far = float((flagged & ~truly_faulty).sum() / n_healthy) if n_healthy else float("nan")
+    mar = float((~flagged & truly_faulty).sum() / n_faulty) if n_faulty else float("nan")
     return far, mar
+
+
+def matrix_report(cm: np.ndarray, labels: Sequence[int]) -> str:
+    """The confusion matrix itself, rows true and columns predicted.
+
+    The per-class table says how well each grade does; only the matrix says which grade
+    it gets mistaken for. For ordinal severities that distinction is the whole question:
+    confusing neighbouring grades is a different failure from confusing the extremes.
+    """
+    cell = max(5, max(len(str(label)) for label in labels) + 2)
+    lines = [f"{'true \\ pred':>13}" + "".join(f"{label:>{cell}}" for label in labels)]
+    lines += [
+        f"{label:>13}" + "".join(f"{count:>{cell}}" for count in cm[i])
+        for i, label in enumerate(labels)
+    ]
+    return "\n".join(lines)
 
 
 def report(cm: np.ndarray, labels: Sequence[int]) -> str:

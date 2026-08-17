@@ -1,0 +1,66 @@
+component    channels   macro F1  accuracy    FAR    MAR
+--------------------------------------------------------
+cooler       all           1.000     1.000  0.000  0.000
+cooler       measured      0.993     0.993  0.000  0.000
+             relies on: TS4_w5_p25, PS5_mean_w5_p75, PS6_mean_w5_max, TS4_w4_p25, TS4_w5_mean
+valve        all           0.987     0.986  0.010  0.011
+valve        measured      0.980     0.980  0.010  0.011
+             relies on: PS2_mean_w0_std, PS2_mean_w0_mean, PS3_mean_w0_mean, PS2_std_w0_max, FS1_w1_max
+pump_leak    all           0.996     0.997  0.008  0.000
+pump_leak    measured      0.996     0.997  0.008  0.000
+             relies on: FS1_w5_mean, FS1_w4_p25, FS1_w5_min, FS1_w3_mean, FS1_w5_p25
+accumulator  all           0.917     0.935  0.111  0.000
+accumulator  measured      0.847     0.871  0.125  0.014
+             relies on: FS1_w3_std, PS1_std_w0_std, PS1_std_w0_max, EPS1_mean_w2_std, PS2_std_w1_max
+
+cooler — measured channels only
+   class    prec  recall      f1       n
+       3   1.000   0.982   0.991     111
+      20   0.979   1.000   0.989      92
+     100   1.000   1.000   1.000      91
+   macro                   0.993     294
+
+  true \ pred    3   20  100
+            3  109    2    0
+           20    0   92    0
+          100    0    0   91
+
+valve — measured channels only
+   class    prec  recall      f1       n
+      73   0.976   1.000   0.988      40
+      80   1.000   0.950   0.974      60
+      90   0.967   0.978   0.972      90
+     100   0.981   0.990   0.986     104
+   macro                   0.980     294
+
+  true \ pred   73   80   90  100
+           73   40    0    0    0
+           80    1   57    2    0
+           90    0    0   88    2
+          100    0    0    1  103
+
+pump_leak — measured channels only
+   class    prec  recall      f1       n
+       0   1.000   0.992   0.996     122
+       1   0.984   1.000   0.992      61
+       2   1.000   1.000   1.000     111
+   macro                   0.996     294
+
+  true \ pred    0    1    2
+            0  121    1    0
+            1    0   61    0
+            2    0    0  111
+
+accumulator — measured channels only
+   class    prec  recall      f1       n
+      90   0.901   0.800   0.848      80
+     100   0.759   0.710   0.733      31
+     115   0.836   0.964   0.895     111
+     130   0.955   0.875   0.913      72
+   macro                   0.847     294
+
+  true \ pred   90  100  115  130
+           90   64    7    9    0
+          100    6   22    3    0
+          115    1    0  107    3
+          130    0    0    9   63

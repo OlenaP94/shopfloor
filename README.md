@@ -4,8 +4,8 @@ Industrial fault diagnosis: multi-output classification of hydraulic component
 condition from raw sensor data, with a retrieval-augmented agent that explains the
 diagnosis and cites the relevant maintenance procedure.
 
-**Status:** week 3 of 13 — data pipeline, resampling and exploratory analysis done;
-feature baselines next.
+**Status:** week 3 of 13 — pipeline, features and random forest baselines done. A
+convolutional model is next; the test set stays sealed until it is time to compare them.
 
 ## Data
 
@@ -115,6 +115,126 @@ itself.
 
 ![Mean waveform per component state](reports/figures/waveforms.png)
 
+## Splitting
+
+Two obvious splits are both wrong here, and neither announces itself.
+
+**Chronological fails.** Cooler condition was varied in one long block: the first ~1460
+cycles cover the two faulty grades and the rest is healthy. A 70/15/15 split by time
+leaves a single class in validation and test, so the cooler cannot be evaluated at all.
+
+**Random leaks.** The rig held one of 144 configurations fixed for a stretch of cycles —
+ten on average, up to 210. Neighbouring cycles inside a block are near-duplicates: same
+fault, same operating point, minutes apart. Splitting by cycle scores the model for
+recognising a run it has already seen.
+
+So the unit of splitting is the **run** — a contiguous block of identical configuration.
+194 of them, assigned whole. A configuration in validation therefore never appears in
+training, which means the model has to generalise to an unseen *combination* of faults.
+That is the deployment case, and it is a stricter test than stratification alone.
+
+One consequence is worth stating: `seed = 42` produces a split with **no
+"close to total failure" valve cycles in the test set** — 21 of 200 seeds do. Nothing
+about that fails loudly; the code runs, the metrics compute, the report looks convincing.
+`split_by_run` therefore validates class coverage and raises rather than returning a
+split that quietly cannot measure what matters. `split_seed` defaults to the first seed
+that passes.
+
+## Baseline results
+
+`make baseline` trains one random forest per component on the 864 windowed features,
+twice — with all 24 channels, and with the three virtual ones removed. **Scored on
+validation.** The test set is spent the moment it is looked at more than once, so it
+stays closed until the final model comparison.
+
+| Component | channels | macro F1 | accuracy | FAR | MAR |
+|---|---|---|---|---|---|
+| Cooler | all | 1.000 | 1.000 | 0.000 | 0.000 |
+| Cooler | measured | 0.993 | 0.993 | 0.000 | 0.000 |
+| Valve | all | 0.987 | 0.986 | 0.010 | 0.011 |
+| Valve | measured | 0.980 | 0.980 | 0.010 | 0.011 |
+| Pump leakage | all | 0.996 | 0.997 | 0.008 | 0.000 |
+| Pump leakage | measured | 0.996 | 0.997 | 0.008 | 0.000 |
+| Accumulator | all | 0.917 | 0.935 | 0.111 | 0.000 |
+| Accumulator | measured | 0.847 | 0.871 | 0.125 | 0.014 |
+
+Validation is 294 cycles, so one misclassified cycle moves accuracy by 0.34 %. Read the
+sub-1-point differences as noise.
+
+### The virtual channels matter less than expected — except in one place
+
+Removing CE, CP and SE costs the cooler 0.7 points, which is **two cycles**. The concern
+was worth measuring and the measurement says the dependence is negligible: CE is derived
+from oil temperature, and the temperature channels are still there, so nothing is lost.
+The pump loses nothing at all.
+
+The accumulator is the exception — 6.4 points, about 19 cycles. That is the opposite of
+what the effect-size ranking suggested, where the cooler looked most exposed. Reported
+both ways precisely because the guess would have been wrong.
+
+### The forests rely on the channels the exploratory analysis identified
+
+| Component | Most important features | Matches |
+|---|---|---|
+| Cooler | `TS4_w5_p25`, `PS5_mean_w5_p75`, `PS6_mean_w5_max` | temperatures and the cooling-circuit pressures |
+| Valve | `PS2_mean_w0_std`, `PS2_mean_w0_mean`, `PS3_mean_w0_mean` | **window `w0`** — the switching transient at 9–11 s |
+| Pump leakage | `FS1_w5_mean`, `FS1_w4_p25`, `FS1_w5_min` | volume flow, which a leak reduces directly |
+| Accumulator | `FS1_w3_std`, `PS1_std_w0_std`, `PS1_std_w0_max` | **four of five are spread, not level** |
+
+Two independent confirmations fall out of this. The valve's features come from the exact
+window where the waveforms diverged, which justifies windowing by *what* the model chose
+rather than only by the metric improving. And the accumulator leans on the block standard
+deviation invented during resampling — including the spread of the spread — which is the
+strongest possible argument for having kept it.
+
+### Errors follow the severity ordering, and never in the expensive direction
+
+Cooler, valve and pump make 2, 6 and 1 mistakes respectively, every one of them between
+**neighbouring** grades. Severe pump leakage is caught 111 times out of 111.
+
+The accumulator makes 38, and a quarter of them jump a grade:
+
+```
+true \ pred   90  100  115  130
+       90    64    7    9    0
+      100     6   22    3    0
+      115     1    0  107    3
+      130     0    0    9   63
+```
+
+| Distance in the ordering 90 < 100 < 115 < 130 | Errors |
+|---|---|
+| Neighbouring | 28 |
+| One grade skipped (90 ↔ 115) | 10 |
+| Two or more skipped | 0 |
+
+But look at where the errors sit rather than how many there are. The `130` column is zero
+for rows `90` and `100`: a badly degraded accumulator is **never** called healthy. All
+three misses are `115 → 130`, the mildest degradation read as healthy. All nine false
+alarms are `130 → 115`, healthy read as the mildest degradation.
+
+The errors are not merely rare, they are displaced towards the safe side. Macro F1 of
+0.847 reads as mediocre; the matrix says the grade is occasionally off by one while the
+alarm itself is always right. For a maintenance engineer those are two different reports,
+which is why both are printed.
+
+### What the baseline implies for the neural network
+
+Three of four components sit between 0.980 and 0.996 on 294 validation cycles. There is
+no room left to beat, so a convolutional model has to be justified differently:
+
+1. **The accumulator**, where 0.847 leaves real headroom, and where the failure is
+   localised to the `90 ↔ 115` pair plus the rare `100` grade (31 cycles bleeding both
+   ways).
+2. **No hand-crafted features.** Reaching the same quality from the raw signal, without
+   the 864 columns we designed, is a result in itself.
+3. **The accumulator's false-alarm rate of 0.125** — one healthy unit in eight sent for
+   service — is the worst operational number in the table.
+
+Cheaper hypotheses come first, though: more windows (the accumulator's pulsation spikes
+are shorter than a 10 s window), balanced class weights, and features aimed at the shape
+of the spike rather than its average.
+
 ## Quick start
 
 ```
@@ -122,6 +242,9 @@ git clone https://github.com/OlenaP94/shopfloor && cd shopfloor
 uv sync
 make data      # downloads and validates 73 MB from UCI
 make tensor    # resamples 17 sensors into a 24-channel tensor
+make features  # 864 windowed features
+make split     # shows the split and its class coverage
+make baseline  # trains the forests, scores them on validation
 make eda       # scores every channel against every fault
 make check     # format, lint, tests
 ```
@@ -132,12 +255,23 @@ make check     # format, lint, tests
 src/shopfloor/data.py       readers for the sensor matrices and profile labels
 src/shopfloor/dataset.py    HydraulicDataset — validated access to one experiment
 src/shopfloor/arrays.py     resampling to one (cycles, channels, timepoints) tensor
+src/shopfloor/features.py   windowed features, 864 columns from 24 channels
+src/shopfloor/splits.py     run-aware train/val/test split with coverage checks
+src/shopfloor/metrics.py    confusion matrix, macro F1, alarm rates — no sklearn
+src/shopfloor/baseline.py   random forests per component, scored on validation
 src/shopfloor/config.py     settings, read from the environment or .env
 scripts/download_data.py    download, checksum and structural validation
 scripts/eda.py              which channels respond to which fault
 reports/figures/            plots, regenerated by `make eda`
+reports/baseline_val.txt    the table and matrices above, regenerated by `make baseline`
 tests/                      unit tests, no dataset required
 ```
+
+`metrics.py` is deliberately written from the confusion matrix up rather than imported.
+`tests/test_metrics_vs_sklearn.py` then checks it against scikit-learn over randomised
+class distributions — which found a case the hand-written tests could not: an undefined
+false-alarm rate was being reported as 0.0, making "no false alarms" and "false alarms
+could not be measured" look identical.
 
 ## Licence
 
