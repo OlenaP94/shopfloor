@@ -22,7 +22,14 @@ class Settings(BaseSettings):
     processed_dir: Path = Path("data/processed")
     """Where derived arrays are written. Created on first write."""
 
+    reports_dir: Path = Path("reports")
+    """Figures and result tables. Committed, unlike anything under data/."""
+
     seed: int = 42
+
+    split_seed: int = 0
+    """Separate from `seed`: 42 hides the valve's worst grade from the test set."""
+
     test_size: float = Field(default=0.2, gt=0, lt=1)
     val_size: float = Field(default=0.15, gt=0, lt=1)
     anthropic_api_key: str | None = None

@@ -1,4 +1,4 @@
-.PHONY: data clean-data tensor features eda lint format test check
+.PHONY: data clean-data tensor features eda split baseline lint format test check
 
 # --- pipeline, in the order it has to run ---------------------------------
 
@@ -10,6 +10,12 @@ tensor:  ## resample 17 sensors into a 24-channel tensor
 
 features:  ## build the per-window feature table
 	uv run python -m shopfloor.features
+
+split:  ## show the train / val / test split and its class coverage
+	uv run python -m shopfloor.splits
+
+baseline:  ## train random forests and score them on validation
+	uv run python -m shopfloor.baseline
 
 eda:  ## plot which channels respond to which fault
 	uv run python scripts/eda.py
