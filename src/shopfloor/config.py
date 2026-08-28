@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     reports_dir: Path = Path("reports")
     """Figures and result tables. Committed, unlike anything under data/."""
 
+    models_dir: Path = Path("models")
+    """Trained checkpoints. Gitignored — reproducible from the code and the seed."""
+
     seed: int = 42
 
     split_seed: int = 0

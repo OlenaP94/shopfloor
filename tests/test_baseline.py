@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from shopfloor.baseline import fit, normalise, score, top_features
+from shopfloor.baseline import fit, normalise, top_features
+from shopfloor.metrics import score
 
 GRADES = [0, 1]
 

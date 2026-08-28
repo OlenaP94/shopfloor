@@ -11,14 +11,7 @@ from sklearn.ensemble import RandomForestClassifier
 from shopfloor.config import settings
 from shopfloor.data import HEALTHY, PROFILE_COLUMNS
 from shopfloor.features import virtual_mask
-from shopfloor.metrics import (
-    accuracy,
-    alarm_rates,
-    confusion_matrix,
-    macro_f1,
-    matrix_report,
-    report,
-)
+from shopfloor.metrics import matrix_report, report, score
 from shopfloor.splits import COMPONENTS, levels, split_by_run
 
 N_TREES = 300
@@ -45,27 +38,6 @@ def fit(
     forest = RandomForestClassifier(n_estimators=N_TREES, random_state=seed, n_jobs=-1)
     forest.fit(features[train], target[train])
     return forest
-
-
-def score(
-    target: np.ndarray,
-    predicted: np.ndarray,
-    grades: list[int],
-    healthy: int,
-) -> tuple[dict[str, float], np.ndarray]:
-    """Grading metrics, operational alarm rates, and the matrix they were derived from.
-
-    Takes predictions rather than a model: scoring has no business knowing that a random
-    forest produced these numbers, and the same function will score the network in week 4.
-    """
-    matrix = confusion_matrix(target, predicted, grades)
-    false_alarm, missed_alarm = alarm_rates(target, predicted, healthy)
-    return {
-        "macro_f1": macro_f1(matrix),
-        "accuracy": accuracy(matrix),
-        "far": false_alarm,
-        "mar": missed_alarm,
-    }, matrix
 
 
 def top_features(forest: RandomForestClassifier, names: list[str], count: int = 5) -> list[str]:

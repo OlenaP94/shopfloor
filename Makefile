@@ -1,4 +1,4 @@
-.PHONY: data clean-data tensor features eda split baseline lint format test check
+.PHONY: data clean-data tensor features eda split baseline train lint format test check
 
 # --- pipeline, in the order it has to run ---------------------------------
 
@@ -16,6 +16,9 @@ split:  ## show the train / val / test split and its class coverage
 
 baseline:  ## train random forests and score them on validation
 	uv run python -m shopfloor.baseline
+
+train:  ## train the multi-head convolutional network
+	uv run python -m shopfloor.train
 
 eda:  ## plot which channels respond to which fault
 	uv run python scripts/eda.py

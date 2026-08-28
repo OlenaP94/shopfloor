@@ -4,8 +4,8 @@ Industrial fault diagnosis: multi-output classification of hydraulic component
 condition from raw sensor data, with a retrieval-augmented agent that explains the
 diagnosis and cites the relevant maintenance procedure.
 
-**Status:** week 3 of 13 — pipeline, features and random forest baselines done. A
-convolutional model is next; the test set stays sealed until it is time to compare them.
+**Status:** week 4 of 13 — pipeline, features, random forest baselines and a multi-head
+convolutional network. The test set stays sealed until the final comparison.
 
 ## Data
 
@@ -235,6 +235,76 @@ Cheaper hypotheses come first, though: more windows (the accumulator's pulsation
 are shorter than a 10 s window), balanced class weights, and features aimed at the shape
 of the spike rather than its average.
 
+## The convolutional network
+
+One shared Conv1D trunk over the raw 24-channel signal, four small classification heads —
+30k to 39k parameters over 1586 training cycles. No hand-crafted features: the network
+sees `(24, 600)` and nothing else. Trained with the sum of four cross-entropy losses on
+Apple Silicon (`mps`), best checkpoint kept by validation loss.
+
+### Global pooling cost 14 points, and the experiment says so
+
+The first version pooled the trunk's activations over the whole cycle — one mean and one
+maximum per feature. It lost badly to the forest. The diagnosis came from week 3's own
+finding: a cycle is a **fixed 60-second program**, so *when* a feature fires is
+information, and the forest had it explicitly in names like `PS2_mean_w0_std`. Global
+pooling discards it.
+
+So one thing changed — the trunk is pooled into 5 time segments rather than 1. Data,
+split, architecture, optimiser, seed and epoch count identical.
+
+| Component | Conv1D, 1 segment | Conv1D, 5 segments | Change |
+|---|---|---|---|
+| Cooler | 0.997 | 1.000 | +0.003 |
+| Valve | 0.985 | 1.000 | +0.015 |
+| Pump leakage | 0.891 | 0.979 | **+0.088** |
+| Accumulator | 0.712 | 0.854 | **+0.142** |
+
+The prediction, written before the run, was that the pump and accumulator would gain
+because their evidence is time-localised, and that the cooler and valve would barely
+move. They gained the most. Capacity and training length were not the problem: the
+network simply could not see where anything happened.
+
+### Network against forest
+
+| Component | RandomForest | Conv1D | Winner |
+|---|---|---|---|
+| Cooler | 1.000 | 1.000 | tie |
+| **Valve** | 0.987 | **1.000** | **network** |
+| Pump leakage | **0.996** | 0.979 | forest, by ~5 cycles |
+| Accumulator | **0.917** | 0.854 | forest, by ~19 cycles |
+
+The valve is graded correctly on all 294 validation cycles. A convolution finds the shape
+of the switching transient itself, where the feature table had to guess at ten-second
+windows — that is the clearest case in this project for learning features rather than
+designing them.
+
+### Two honest caveats
+
+**The accumulator number is partly luck.** Its validation loss oscillates between 0.35
+and 0.82 across epochs while training loss sits at 0.003 — the network has memorised
+1586 cycles and validation is sampling noise. Worse, the checkpoint is selected on the
+*mean* loss of four heads, and the mean is dominated by the cooler and valve at 0.000.
+The weights kept for the accumulator are therefore close to arbitrary. Fixing the
+selection criterion, and adding weight decay, comes before any further architecture work.
+
+**Macro F1 understates the network on the accumulator.** It makes 38 errors — the same
+count as the forest — but every one is between *neighbouring* grades, where the forest
+skipped a grade ten times:
+
+```
+true \ pred  90 100 115 130
+       90   77   3   0   0
+      100    4  25   2   0
+      115    0   8  90  13
+      130    0   0   8  64
+```
+
+In an ordinal scale those errors are cheaper, and macro F1 cannot see it because it treats
+grades as unrelated labels. The trade runs the other way on missed alarms: 13 cycles at
+the mildest degradation are called healthy, so MAR rises to 0.059 against the forest's
+0.014.
+
 ## Quick start
 
 ```
@@ -245,6 +315,7 @@ make tensor    # resamples 17 sensors into a 24-channel tensor
 make features  # 864 windowed features
 make split     # shows the split and its class coverage
 make baseline  # trains the forests, scores them on validation
+make train     # trains the convolutional network
 make eda       # scores every channel against every fault
 make check     # format, lint, tests
 ```
@@ -259,11 +330,14 @@ src/shopfloor/features.py   windowed features, 864 columns from 24 channels
 src/shopfloor/splits.py     run-aware train/val/test split with coverage checks
 src/shopfloor/metrics.py    confusion matrix, macro F1, alarm rates — no sklearn
 src/shopfloor/baseline.py   random forests per component, scored on validation
+src/shopfloor/net.py        device, dataset and the multi-head Conv1D architecture
+src/shopfloor/train.py      training loop, checkpointing, scoring against the baseline
 src/shopfloor/config.py     settings, read from the environment or .env
 scripts/download_data.py    download, checksum and structural validation
 scripts/eda.py              which channels respond to which fault
 reports/figures/            plots, regenerated by `make eda`
-reports/baseline_val.txt    the table and matrices above, regenerated by `make baseline`
+reports/baseline_val.txt    forest results, regenerated by `make baseline`
+reports/convnet_val_seg*.txt network results, one file per pooling setting
 tests/                      unit tests, no dataset required
 ```
 

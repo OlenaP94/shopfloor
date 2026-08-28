@@ -81,6 +81,27 @@ def alarm_rates(y_true: np.ndarray, y_pred: np.ndarray, healthy: int) -> tuple[f
     return far, mar
 
 
+def score(
+    target: np.ndarray,
+    predicted: np.ndarray,
+    grades: Sequence[int],
+    healthy: int,
+) -> tuple[dict[str, float], np.ndarray]:
+    """Grading metrics, operational alarm rates, and the matrix they were derived from.
+
+    Takes predictions rather than a model, so the same function scores the random forest
+    and the convolutional network without knowing that either exists.
+    """
+    matrix = confusion_matrix(target, predicted, grades)
+    false_alarm, missed_alarm = alarm_rates(target, predicted, healthy)
+    return {
+        "macro_f1": macro_f1(matrix),
+        "accuracy": accuracy(matrix),
+        "far": false_alarm,
+        "mar": missed_alarm,
+    }, matrix
+
+
 def matrix_report(cm: np.ndarray, labels: Sequence[int]) -> str:
     """The confusion matrix itself, rows true and columns predicted.
 
