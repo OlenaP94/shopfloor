@@ -1,0 +1,19 @@
+Autoencoder trained on cooler = 100 only
+threshold = 99th percentile of training error = 0.14183
+
+  cooler   cycles   mean error     median   flagged
+----------------------------------------------------
+       3      111      1.47342    1.48380   100.0%
+      20       92      0.31094    0.30499   100.0%
+     100       91      0.02846    0.02635     0.0%
+
+   component grades seen in training         AUC  interpretation
+------------------------------------------------------------------------
+      cooler [100]                         1.000  held out — should be flagged
+       valve [73, 80, 90, 100]             0.472  seen — should not separate
+   pump_leak [0, 1, 2]                     0.559  seen — should not separate
+ accumulator [90, 100, 115, 130]           0.622  seen — should not separate
+
+No labels were used in training. A high AUC on the held-out component together
+with AUC near 0.5 on the others is the result worth having: the detector reacts
+to conditions absent from its training data, and only to those.

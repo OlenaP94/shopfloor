@@ -21,9 +21,9 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from shopfloor.config import settings
-from shopfloor.data import PROFILE_COLUMNS
+from shopfloor.data import HEALTHY, PROFILE_COLUMNS
 from shopfloor.net import CycleDataset, channel_stats, count_parameters, get_device
-from shopfloor.splits import levels, split_by_run
+from shopfloor.splits import COMPONENTS, levels, split_by_run
 
 BATCH = 32
 EPOCHS = 80
@@ -170,12 +170,29 @@ if __name__ == "__main__":
             f"{np.median(selected):>10.5f} {flagged:>8.1%}"
         )
 
-    degraded = (val_cooler != HEALTHY_COOLER).astype(int)
+    # The control that decides what this result is worth. The cooler was held healthy in
+    # training, so its degraded grades are unfamiliar and should be flagged. The other
+    # three varied freely, so the detector has seen every one of their grades and must
+    # NOT separate them — otherwise it is not detecting unfamiliarity, it is detecting
+    # "something is wrong", which no amount of reconstruction error can justify.
     lines += [
         "",
-        f"AUC for separating a degraded cooler by error alone: "
-        f"{roc_auc_score(degraded, val_errors):.3f}",
-        "no labels were used in training — the ordering is learned from the signal.",
+        f"{'component':>12} {'grades seen in training':<28} {'AUC':>6}  interpretation",
+        "-" * 72,
+    ]
+
+    for component in COMPONENTS:
+        column = labels[:, PROFILE_COLUMNS.index(component)]
+        seen = sorted(set(column[familiar].tolist()))
+        auc = roc_auc_score((column[split.val] != HEALTHY[component]).astype(int), val_errors)
+        note = "held out — should be flagged" if len(seen) == 1 else "seen — should not separate"
+        lines.append(f"{component:>12} {str(seen):<28} {auc:>6.3f}  {note}")
+
+    lines += [
+        "",
+        "No labels were used in training. A high AUC on the held-out component together",
+        "with AUC near 0.5 on the others is the result worth having: the detector reacts",
+        "to conditions absent from its training data, and only to those.",
     ]
 
     summary = "\n".join(lines)
