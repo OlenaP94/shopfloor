@@ -305,6 +305,36 @@ grades as unrelated labels. The trade runs the other way on missed alarms: 13 cy
 the mildest degradation are called healthy, so MAR rises to 0.059 against the forest's
 0.014.
 
+### Ablations, and where the noise floor is
+
+| Change | Accumulator macro F1 | Verdict |
+|---|---|---|
+| Global pooling → 5 time segments | 0.712 → 0.854 | **effect** |
+| Checkpoint on mean loss → on macro F1 | 0.854 → 0.851 | no effect detected |
+| Accumulator loss weight 1 → 3 | 0.851 → 0.856 | no effect detected |
+
+The second and third rows need a caveat that is easy to omit and changes their meaning.
+Within a single run the mean macro F1 swings by 0.05 between neighbouring epochs — 0.938,
+0.925, 0.901, 0.955 at epochs 45, 50, 55, 60. Differences of 0.003 and 0.005 are seventy
+times smaller than that. One run per configuration cannot distinguish them, so the honest
+statement is "no effect detected", not "the effect is small". Separating those would take
+five seeds per configuration and a comparison of means.
+
+The pooling change survives the same test: 0.142 is three times the swing, and it moved
+exactly the two components whose evidence is time-localised, as predicted before the run.
+
+Both null results are still worth their three minutes. Selecting the checkpoint on the
+metric that gets reported is a correctness fix, not an improvement, and it makes every
+later experiment interpretable. And the loss weighting closed a live hypothesis: the
+accumulator is not starved of the shared trunk, it is simply the hard task — 31 of 294
+validation cycles at grade 100, and grades 100 and 115 differ subtly.
+
+The weighting run also illustrates why four numbers are reported instead of one. Macro F1
+rose by 0.005 while total errors rose from 37 to 40, because macro F1 weights the rare
+grade equally and the model shifted towards it. Meanwhile the missed-alarm rate doubled,
+0.059 to 0.108: twenty-four degraded accumulators called healthy instead of thirteen. On
+the headline metric it is a marginal win; for a maintenance system it is a clear loss.
+
 ## Quick start
 
 ```

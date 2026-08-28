@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 
 from shopfloor.config import settings
 from shopfloor.data import HEALTHY, PROFILE_COLUMNS
-from shopfloor.metrics import matrix_report, report, score
+from shopfloor.metrics import confusion_matrix, macro_f1, matrix_report, report, score
 from shopfloor.net import (
     CycleDataset,
     MultiHeadConvNet,
@@ -28,14 +28,36 @@ Three stride-2 convolutions turn 600 timepoints into 75, and 75 = 3 x 5 x 5 — 
 segment count has to divide 75. Five gives 12 seconds of cycle per segment.
 """
 
+LOSS_WEIGHTS: dict[str, float] = {
+    "cooler": 1.0,
+    "valve": 1.0,
+    "pump_leak": 1.0,
+    "accumulator": 1.0,
+}
+"""How much each head's loss counts towards the shared trunk's gradient.
+
+Kept at 1.0 after testing 3.0 on the accumulator. That raised its macro F1 by 0.005 —
+far below the 0.05 swing between neighbouring epochs of a single run, so no effect was
+detected — while doubling its missed-alarm rate from 0.059 to 0.108, because the model
+traded misses for false alarms. Worse where it matters, no better where it is measured.
+"""
+
+RUN = f"seg{N_SEGMENTS}_w{LOSS_WEIGHTS['accumulator']:g}"
+"""Names the checkpoint and report, so runs do not overwrite each other."""
+
 
 def train_epoch(
     model: nn.Module,
     loader: DataLoader,
     optimiser: torch.optim.Optimizer,
     device: torch.device,
+    weights: dict[str, float],
 ) -> dict[str, float]:
-    """One pass over the training data. Returns the mean loss of each head."""
+    """One pass over the training data. Returns the mean *unweighted* loss of each head.
+
+    The weights change what the optimiser chases; the reported losses stay unweighted so
+    that numbers from differently weighted runs remain comparable.
+    """
     model.train()  # BatchNorm uses this batch's statistics, and dropout would be active
     criterion = nn.CrossEntropyLoss()
     totals = dict.fromkeys(COMPONENTS, 0.0)
@@ -52,8 +74,8 @@ def train_epoch(
             component: criterion(outputs[component], y[:, i])
             for i, component in enumerate(COMPONENTS)
         }
-        total = sum(losses.values())
-        total.backward()
+        weighted = sum(weights[component] * losses[component] for component in COMPONENTS)
+        weighted.backward()
         optimiser.step()
 
         # .item() detaches the number from the graph; keeping the tensor would keep the
@@ -94,9 +116,36 @@ def predict(model: nn.Module, loader: DataLoader, device: torch.device) -> dict[
     return {component: np.concatenate(parts) for component, parts in collected.items()}
 
 
-def loss_line(label: str, losses: dict[str, float]) -> str:
-    """Losses of all four heads on one line, so divergence between them is visible."""
-    return label + "  ".join(f"{name[:5]} {value:.3f}" for name, value in losses.items())
+def validation_macro_f1(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    targets: dict[str, np.ndarray],
+    grades: dict[str, list[int]],
+) -> dict[str, float]:
+    """Macro F1 per component on the validation split.
+
+    Selecting the checkpoint on this rather than on the mean loss, because the four
+    losses are not on a comparable scale: the cooler reaches 0.000 by epoch 25 and then
+    decides the mean, which leaves the accumulator's weights chosen essentially at random.
+    Choosing on the metric that gets reported keeps selection and evaluation in one
+    language.
+    """
+    predicted_indices = predict(model, loader, device)
+    result: dict[str, float] = {}
+
+    for component in COMPONENTS:
+        order = np.asarray(grades[component])
+        matrix = confusion_matrix(
+            targets[component], order[predicted_indices[component]], grades[component]
+        )
+        result[component] = macro_f1(matrix)
+    return result
+
+
+def metric_line(label: str, values: dict[str, float]) -> str:
+    """All four heads on one line, so divergence between them stays visible."""
+    return label + "  ".join(f"{name[:5]} {value:.3f}" for name, value in values.items())
 
 
 if __name__ == "__main__":
@@ -123,44 +172,51 @@ if __name__ == "__main__":
     ).to(device)
     optimiser = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-    checkpoint = settings.models_dir / f"convnet_seg{N_SEGMENTS}.pt"
+    targets = {
+        component: labels[split.val, PROFILE_COLUMNS.index(component)] for component in COMPONENTS
+    }
+
+    checkpoint = settings.models_dir / f"convnet_{RUN}.pt"
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
-    best = float("inf")
+    best, best_epoch = 0.0, 0
 
     print(f"{count_parameters(model):,} parameters over {len(train_set)} training cycles")
     print(f"device {device}, {EPOCHS} epochs, batch {BATCH}, lr {LEARNING_RATE}")
-    print(f"pooling into {N_SEGMENTS} time segment(s)\n")
+    print(f"pooling into {N_SEGMENTS} time segment(s)")
+    print(f"loss weights {LOSS_WEIGHTS}\n")
 
     for epoch in range(1, EPOCHS + 1):
-        train_losses = train_epoch(model, train_loader, optimiser, device)
+        train_losses = train_epoch(model, train_loader, optimiser, device, LOSS_WEIGHTS)
         val_losses = evaluate(model, val_loader, device)
-        mean_val = sum(val_losses.values()) / len(val_losses)
+        val_f1 = validation_macro_f1(model, val_loader, device, targets, grades)
+        mean_f1 = sum(val_f1.values()) / len(val_f1)
 
-        improved = mean_val < best
+        improved = mean_f1 > best
         if improved:
-            best = mean_val
-            # Keeping the best weights rather than the last: validation loss will start
-            # rising once 30k parameters begin memorising 1586 cycles.
+            best, best_epoch = mean_f1, epoch
+            # Best weights, not last: validation stops improving long before epoch 60,
+            # once 39k parameters begin memorising 1586 cycles.
             torch.save(model.state_dict(), checkpoint)
 
         if epoch == 1 or epoch % 5 == 0:
-            marker = "  saved" if improved else ""
+            gap = sum(val_losses.values()) - sum(train_losses.values())
+            print(f"epoch {epoch:>3}  " + metric_line("train loss  ", train_losses))
             print(
-                f"epoch {epoch:>3}  "
-                + loss_line("train ", train_losses)
-                + "   |   "
-                + loss_line("val ", val_losses)
-                + marker
+                " " * 10
+                + metric_line("val F1      ", val_f1)
+                + f"   mean {mean_f1:.3f}   gap {gap:+.2f}"
+                + ("  saved" if improved else "")
             )
 
-    print(f"\nbest mean validation loss {best:.4f}, checkpoint at {checkpoint}")
+    print(f"\nbest mean macro F1 {best:.4f} at epoch {best_epoch}, checkpoint {checkpoint}")
 
     model.load_state_dict(torch.load(checkpoint))
     predicted_indices = predict(model, val_loader, device)
 
     header = f"{'component':<12} {'macro F1':>9} {'accuracy':>9} {'FAR':>6} {'MAR':>6}"
     lines = [
-        f"\nConv1D on validation, pooling into {N_SEGMENTS} segment(s)",
+        f"\nConv1D on validation — {N_SEGMENTS} segment(s), "
+        f"accumulator loss weight {LOSS_WEIGHTS['accumulator']:g}",
         header,
         "-" * len(header),
     ]
@@ -186,7 +242,7 @@ if __name__ == "__main__":
     summary = "\n".join(lines + matrices)
     print(summary)
 
-    destination = settings.reports_dir / f"convnet_val_seg{N_SEGMENTS}.txt"
+    destination = settings.reports_dir / f"convnet_val_{RUN}.txt"
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(summary.lstrip() + "\n")
     print(f"\nwritten to {destination}")
